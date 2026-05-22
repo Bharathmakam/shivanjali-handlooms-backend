@@ -1,0 +1,143 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id          String   @id @default(uuid())
+  email       String   @unique
+  password    String
+  firstName   String
+  lastName    String
+  phone       String   @unique
+  role        String   @default("CUSTOMER")
+  isVerified  Boolean  @default(false)
+  verifiedAt  DateTime?
+
+  cart          Cart?
+  orders        Order[]
+  addresses     Address[]
+  wishlistItems WishlistItem[]
+
+  @@map("users")
+}
+
+model OtpVerification {
+  id        String   @id @default(uuid())
+  email     String
+  otp       String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@map("otp_verifications")
+}
+
+model Product {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  category    String?
+  price       Float
+  sku         String?
+  quantity    Int      @default(0)
+  status      String   @default("ACTIVE")
+  isHandloom  Boolean  @default(true)
+  images      Json?
+  createdAt   DateTime @default(now())
+
+  cartItems     CartItem[]
+  wishlistItems WishlistItem[]
+
+  @@map("products")
+}
+
+model Cart {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id])
+  items     CartItem[]
+  updatedAt DateTime @updatedAt
+
+  @@map("carts")
+}
+
+model CartItem {
+  id        String   @id @default(uuid())
+  cartId    String
+  cart      Cart     @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product  @relation(fields: [productId], references: [id])
+  quantity  Int      @default(1)
+  fallPico  Boolean  @default(false)
+
+  @@unique([cartId, productId, fallPico])
+  @@map("cart_items")
+}
+
+model Address {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String
+  phone       String
+  addressLine String
+  city        String?
+  state       String?
+  pinCode     String
+  isDefault   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  @@map("addresses")
+}
+
+model Order {
+  id              String   @id @default(uuid())
+  userId          String?
+  user            User?    @relation(fields: [userId], references: [id])
+  customerName    String
+  email           String
+  phone           String
+  shippingAddress String
+  pinCode         String
+  city            String?
+  state           String?
+  items           Json
+  subtotal        Float
+  shippingCost    Float    @default(0)
+  gstAmount       Float
+  discountAmount  Float    @default(0)
+  total           Float
+  paymentMethod   String
+  status          String   @default("PENDING")
+  paymentId       String?
+  razorpayOrderId String?
+  awbNumber       String?
+  createdAt       DateTime @default(now())
+
+  @@map("orders")
+}
+
+model WishlistItem {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product  @relation(fields: [productId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@unique([userId, productId])
+  @@map("wishlist_items")
+}
+
+model PasswordReset {
+  id        String   @id @default(uuid())
+  email     String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@map("password_resets")
+}
