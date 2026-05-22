@@ -13,7 +13,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { ContactModule } from './contact/contact.module';
 import { NewsletterModule } from './newsletter/newsletter.module';
 import { AdminDashboardModule } from './admin-dashboard/admin-dashboard.module';
-import { ImageKitModule } from './imagekit/imagekit.module';
+import { UploadModule } from './upload/upload.module';
 import { CartModule } from './cart/cart.module';
 import { AddressModule } from './address/address.module';
 import { OtpModule } from './otp/otp.module';
@@ -34,7 +34,7 @@ import { EmailModule } from './email/email.module';
     ContactModule,
     NewsletterModule,
     AdminDashboardModule,
-    ImageKitModule,
+    UploadModule,
     CartModule,
     AddressModule,
     OtpModule,

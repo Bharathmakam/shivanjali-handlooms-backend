@@ -21,45 +21,32 @@ export interface ProcessedImageSet {
 @Injectable()
 export class ImageProcessingService {
   private readonly logger = new Logger(ImageProcessingService.name);
-  private readonly sharp: any;
+  private readonly sharpFn: any;
 
-  // Image size presets for an ecommerce handloom store
   private readonly SIZES = {
     large: { width: 1200, height: 1800 },
     medium: { width: 600, height: 900 },
     thumbnail: { width: 200, height: 300 },
   };
 
-  private readonly QUALITY = {
-    webp: 80,
-    jpeg: 85,
-  };
+  private readonly QUALITY = { webp: 80, jpeg: 85 };
 
   constructor() {
-    // sharp is a CJS default export, handle both ESM/CJS
-    this.sharp = typeof sharp === 'function' ? sharp : (sharp as any).default || (sharp as any)['module.exports'];
+    this.sharpFn = typeof sharp === 'function' ? sharp : (sharp as any).default || (sharp as any)['module.exports'];
   }
 
-  /**
-   * Process an uploaded image: generate multiple sizes + WebP versions
-   * Returns buffers ready for upload to R2
-   */
   async processUpload(file: Express.Multer.File): Promise<ProcessedImageSet> {
     this.logger.log(`Processing image: ${file.originalname} (${file.size} bytes)`);
 
-    const image = this.sharp(file.buffer);
-    const metadata = await image.metadata();
-
+    const metadata = await this.sharpFn(file.buffer).metadata();
     if (!metadata.width || !metadata.height) {
       throw new Error(`Invalid image: ${file.originalname}`);
     }
 
-    // Generate original (optimized WebP)
-    const originalBuffer = await this.sharp(file.buffer)
+    const originalBuffer = await this.sharpFn(file.buffer)
       .webp({ quality: this.QUALITY.webp })
       .toBuffer();
 
-    // Generate sized variants
     const largeBuffer = await this.resizeToWebP(file.buffer, this.SIZES.large);
     const mediumBuffer = await this.resizeToWebP(file.buffer, this.SIZES.medium);
     const thumbnailBuffer = await this.resizeToWebP(file.buffer, this.SIZES.thumbnail);
@@ -88,45 +75,30 @@ export class ImageProcessingService {
     };
   }
 
-  /**
-   * Resize image to fit within given dimensions and convert to WebP
-   */
   private async resizeToWebP(
     buffer: Buffer,
     size: { width: number; height: number },
   ): Promise<Buffer> {
-    return this.sharp(buffer)
-      .resize(size.width, size.height, {
-        fit: 'inside',
-        withoutEnlargement: true,
-      })
+    return this.sharpFn(buffer)
+      .resize(size.width, size.height, { fit: 'inside', withoutEnlargement: true })
       .webp({ quality: this.QUALITY.webp })
       .toBuffer();
   }
 
-  /**
-   * Generate a thumbnail from a buffer (lightweight, for quick use)
-   */
   async generateThumbnail(buffer: Buffer, width = 200, height = 300): Promise<Buffer> {
-    return this.sharp(buffer)
+    return this.sharpFn(buffer)
       .resize(width, height, { fit: 'inside', withoutEnlargement: true })
       .webp({ quality: 70 })
       .toBuffer();
   }
 
-  /**
-   * Get image metadata without processing
-   */
   async getMetadata(buffer: Buffer): Promise<any> {
-    return this.sharp(buffer).metadata();
+    return this.sharpFn(buffer).metadata();
   }
 
-  /**
-   * Validate that a buffer is a valid image
-   */
   async validateImage(buffer: Buffer): Promise<{ valid: boolean; error?: string }> {
     try {
-      const metadata = await this.sharp(buffer).metadata();
+      const metadata = await this.sharpFn(buffer).metadata();
       if (!metadata.format) {
         return { valid: false, error: 'Unable to determine image format' };
       }

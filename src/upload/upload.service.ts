@@ -3,9 +3,9 @@ import { S3Client, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client
 import { ImageProcessingService } from './image-processing.service';
 
 @Injectable()
-export class StorageService {
+export class UploadService {
   private s3: S3Client;
-  private readonly logger = new Logger(StorageService.name);
+  private readonly logger = new Logger(UploadService.name);
   private bucket: string;
   private publicUrl: string;
   private isConfigured: boolean;
@@ -14,7 +14,7 @@ export class StorageService {
     const accountId = process.env.R2_ACCOUNT_ID;
     const accessKeyId = process.env.R2_ACCESS_KEY_ID;
     const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY;
-    
+
     this.bucket = process.env.R2_BUCKET_NAME || 'withered-salad-0434';
     this.publicUrl = process.env.R2_PUBLIC_URL || '';
     this.isConfigured = !!(accountId && accessKeyId && secretAccessKey);
@@ -28,7 +28,7 @@ export class StorageService {
           secretAccessKey: secretAccessKey!,
         },
       });
-      this.logger.log(`R2 configured: bucket=${this.bucket}, endpoint=${process.env.R2_S3_ENDPOINT}`);
+      this.logger.log(`R2 configured: bucket=${this.bucket}`);
     } else {
       this.logger.warn('R2 not configured. Using mock upload mode.');
     }
@@ -65,8 +65,8 @@ export class StorageService {
     try {
       const baseKey = `${folder}/${Date.now()}-${file.originalname.replace(/\s+/g, '-').replace(/\.[^.]+$/, '')}`;
 
-      // Upload all variants in parallel
-      const [originalResult, largeResult, mediumResult, thumbResult] = await Promise.all([
+      // Upload all variants to R2 in parallel
+      await Promise.all([
         this.uploadToR2(`${baseKey}.webp`, processed.original, 'image/webp'),
         this.uploadToR2(`${baseKey}-large.webp`, processed.large, 'image/webp'),
         this.uploadToR2(`${baseKey}-medium.webp`, processed.medium, 'image/webp'),
@@ -111,14 +111,13 @@ export class StorageService {
   async deleteFile(fileId: string) {
     if (!this.isConfigured) return;
     try {
-      // Delete all variants (original + large + medium + thumb)
       const variants = ['.webp', '-large.webp', '-medium.webp', '-thumb.webp'];
       await Promise.all(
         variants.map(suffix =>
           this.s3.send(new DeleteObjectCommand({
             Bucket: this.bucket,
             Key: `${fileId}${suffix}`,
-          })).catch(() => {/* ignore if variant doesn't exist */})
+          })).catch(() => {})
         )
       );
       this.logger.log(`Deleted file variants: ${fileId}`);
