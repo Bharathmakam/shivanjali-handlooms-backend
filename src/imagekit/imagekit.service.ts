@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { S3Client, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { ImageProcessingService } from './image-processing.service';
 
 @Injectable()
 export class StorageService {
@@ -9,7 +10,7 @@ export class StorageService {
   private publicUrl: string;
   private isConfigured: boolean;
 
-  constructor() {
+  constructor(private readonly imageProcessing: ImageProcessingService) {
     const accountId = process.env.R2_ACCOUNT_ID;
     const accessKeyId = process.env.R2_ACCESS_KEY_ID;
     const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY;
@@ -35,36 +36,57 @@ export class StorageService {
 
   async uploadFile(file: Express.Multer.File, folder = 'products') {
     this.logger.log(`Upload request: ${file.originalname}, size: ${file.size}`);
-    
+
+    // Validate and process the image with Sharp
+    const validation = await this.imageProcessing.validateImage(file.buffer);
+    if (!validation.valid) {
+      this.logger.warn(`Invalid image uploaded: ${validation.error}`);
+      return {
+        url: `https://via.placeholder.com/800x1200?text=InvalidImage`,
+        fileId: `invalid_${Date.now()}`,
+        thumbnailUrl: `https://via.placeholder.com/200x300?text=InvalidImage`,
+      };
+    }
+
+    // Process image into multiple sizes + WebP
+    const processed = await this.imageProcessing.processUpload(file);
+
     if (!this.isConfigured) {
       this.logger.warn('R2 not configured, returning mock URL');
       return {
         url: `https://via.placeholder.com/800x1200?text=${encodeURIComponent(file.originalname)}`,
         fileId: `mock_${Date.now()}`,
         thumbnailUrl: `https://via.placeholder.com/200x300?text=${encodeURIComponent(file.originalname)}`,
+        mediumUrl: `https://via.placeholder.com/400x600?text=${encodeURIComponent(file.originalname)}`,
+        largeUrl: `https://via.placeholder.com/800x1200?text=${encodeURIComponent(file.originalname)}`,
       };
     }
 
     try {
-      const key = `${folder}/${Date.now()}-${file.originalname.replace(/\s+/g, '-')}`;
-      this.logger.log(`Uploading to R2: ${this.bucket}/${key}`);
-      
-      await this.s3.send(new PutObjectCommand({
-        Bucket: this.bucket,
-        Key: key,
-        Body: file.buffer,
-        ContentType: file.mimetype,
-      }));
+      const baseKey = `${folder}/${Date.now()}-${file.originalname.replace(/\s+/g, '-').replace(/\.[^.]+$/, '')}`;
 
-      const url = this.publicUrl 
-        ? `${this.publicUrl}/${key}`
-        : `https://${this.bucket}.${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com/${key}`;
+      // Upload all variants in parallel
+      const [originalResult, largeResult, mediumResult, thumbResult] = await Promise.all([
+        this.uploadToR2(`${baseKey}.webp`, processed.original, 'image/webp'),
+        this.uploadToR2(`${baseKey}-large.webp`, processed.large, 'image/webp'),
+        this.uploadToR2(`${baseKey}-medium.webp`, processed.medium, 'image/webp'),
+        this.uploadToR2(`${baseKey}-thumb.webp`, processed.thumbnail, 'image/webp'),
+      ]);
 
-      this.logger.log(`Upload successful: ${url}`);
+      const baseUrl = this.publicUrl
+        ? `${this.publicUrl}/${baseKey}`
+        : `https://${this.bucket}.${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com/${baseKey}`;
+
+      this.logger.log(`Upload successful: ${baseUrl}.webp (+ variants)`);
       return {
-        url,
-        fileId: key,
-        thumbnailUrl: url,
+        url: `${baseUrl}.webp`,
+        fileId: baseKey,
+        thumbnailUrl: `${baseUrl}-thumb.webp`,
+        mediumUrl: `${baseUrl}-medium.webp`,
+        largeUrl: `${baseUrl}-large.webp`,
+        width: processed.metadata.width,
+        height: processed.metadata.height,
+        originalSize: processed.metadata.size,
       };
     } catch (error: any) {
       this.logger.error(`R2 upload failed: ${error.message}`, error.stack);
@@ -76,13 +98,30 @@ export class StorageService {
     }
   }
 
+  private async uploadToR2(key: string, buffer: Buffer, contentType: string) {
+    await this.s3.send(new PutObjectCommand({
+      Bucket: this.bucket,
+      Key: key,
+      Body: buffer,
+      ContentType: contentType,
+    }));
+    return key;
+  }
+
   async deleteFile(fileId: string) {
     if (!this.isConfigured) return;
     try {
-      await this.s3.send(new DeleteObjectCommand({
-        Bucket: this.bucket,
-        Key: fileId,
-      }));
+      // Delete all variants (original + large + medium + thumb)
+      const variants = ['.webp', '-large.webp', '-medium.webp', '-thumb.webp'];
+      await Promise.all(
+        variants.map(suffix =>
+          this.s3.send(new DeleteObjectCommand({
+            Bucket: this.bucket,
+            Key: `${fileId}${suffix}`,
+          })).catch(() => {/* ignore if variant doesn't exist */})
+        )
+      );
+      this.logger.log(`Deleted file variants: ${fileId}`);
     } catch (error) {
       this.logger.error('R2 delete failed', error);
     }
