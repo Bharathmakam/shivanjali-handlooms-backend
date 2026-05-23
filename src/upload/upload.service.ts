@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, InternalServerErrorException } from '@nestjs/common';
 import { S3Client, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { ImageProcessingService } from './image-processing.service';
 
@@ -30,37 +30,26 @@ export class UploadService {
       });
       this.logger.log(`R2 configured: bucket=${this.bucket}`);
     } else {
-      this.logger.warn('R2 not configured. Using mock upload mode.');
+      this.logger.warn('R2 not configured. Uploads will fail.');
     }
   }
 
   async uploadFile(file: Express.Multer.File, folder = 'products') {
     this.logger.log(`Upload request: ${file.originalname}, size: ${file.size}`);
 
-    // Validate and process the image with Sharp
+    if (!this.isConfigured) {
+      throw new InternalServerErrorException('Cloud storage is not configured. Please contact support.');
+    }
+
+    // Validate the image with Sharp
     const validation = await this.imageProcessing.validateImage(file.buffer);
     if (!validation.valid) {
       this.logger.warn(`Invalid image uploaded: ${validation.error}`);
-      return {
-        url: `https://via.placeholder.com/800x1200?text=InvalidImage`,
-        fileId: `invalid_${Date.now()}`,
-        thumbnailUrl: `https://via.placeholder.com/200x300?text=InvalidImage`,
-      };
+      throw new BadRequestException(`Invalid image: ${validation.error}`);
     }
 
     // Process image into multiple sizes + WebP
     const processed = await this.imageProcessing.processUpload(file);
-
-    if (!this.isConfigured) {
-      this.logger.warn('R2 not configured, returning mock URL');
-      return {
-        url: `https://via.placeholder.com/800x1200?text=${encodeURIComponent(file.originalname)}`,
-        fileId: `mock_${Date.now()}`,
-        thumbnailUrl: `https://via.placeholder.com/200x300?text=${encodeURIComponent(file.originalname)}`,
-        mediumUrl: `https://via.placeholder.com/400x600?text=${encodeURIComponent(file.originalname)}`,
-        largeUrl: `https://via.placeholder.com/800x1200?text=${encodeURIComponent(file.originalname)}`,
-      };
-    }
 
     try {
       const baseKey = `${folder}/${Date.now()}-${file.originalname.replace(/\s+/g, '-').replace(/\.[^.]+$/, '')}`;
@@ -90,11 +79,7 @@ export class UploadService {
       };
     } catch (error: any) {
       this.logger.error(`R2 upload failed: ${error.message}`, error.stack);
-      return {
-        url: `https://via.placeholder.com/800x1200?text=UploadFailed`,
-        fileId: `error_${Date.now()}`,
-        thumbnailUrl: `https://via.placeholder.com/200x300?text=UploadFailed`,
-      };
+      throw new InternalServerErrorException('Image upload failed. Please try again.');
     }
   }
 
