@@ -26,12 +26,9 @@ export class CartController {
   }
 
   @Patch('items/:id')
-  async updateItem(@Req() req: JwtRequest, @Param('id') id: string, @Body() data: { quantity?: number; fallPico?: boolean }) {
+  async updateItem(@Req() req: JwtRequest, @Param('id') id: string, @Body() data: { quantity?: number }) {
     if (data.quantity !== undefined) {
       return this.cartService.updateItemQuantity(req.user.id, id, data.quantity);
-    }
-    if (data.fallPico !== undefined) {
-      return this.cartService.toggleFallPico(req.user.id, id, data.fallPico);
     }
     return this.cartService.getOrCreateCart(req.user.id);
   }

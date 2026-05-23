@@ -2,7 +2,6 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { OrdersService } from './orders.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { TaxesService } from '../taxes/taxes.service';
 import { LogisticsService } from '../logistics/logistics.service';
 import { CrmService } from '../crm/crm.service';
 
@@ -15,8 +14,8 @@ const mockOrder = {
   shippingAddress: '123 Main St',
   subtotal: 5000,
   shippingCost: 0,
-  gstAmount: 250,
-  total: 5250,
+  gstAmount: 0,
+  total: 5000,
   paymentMethod: 'RAZORPAY',
   status: 'PENDING',
   items: [],
@@ -47,10 +46,6 @@ const mockPrisma = {
   },
 };
 
-const mockTaxesService = {
-  calculateGST: jest.fn().mockReturnValue({ gstRate: 5, gstAmount: 250, totalBase: 5000, totalService: 0, totalWithTax: 5250 }),
-};
-
 const mockLogisticsService = {
   checkCodEligibility: jest.fn().mockReturnValue({ available: true, reason: '' }),
 };
@@ -68,7 +63,6 @@ describe('OrdersService', () => {
       providers: [
         OrdersService,
         { provide: PrismaService, useValue: mockPrisma },
-        { provide: TaxesService, useValue: mockTaxesService },
         { provide: LogisticsService, useValue: mockLogisticsService },
         { provide: CrmService, useValue: mockCrmService },
       ],
@@ -80,7 +74,7 @@ describe('OrdersService', () => {
 
   describe('createOrder', () => {
     const orderData = {
-      items: [{ productId: 'prod-1', name: 'Silk Saree', price: 5000, quantity: 1, fallPico: false }],
+      items: [{ productId: 'prod-1', name: 'Silk Saree', price: 5000, quantity: 1 }],
       pinCode: '411001',
       paymentMethod: 'RAZORPAY',
       customerDetails: { name: 'Test User', email: 'test@test.com', phone: '9999999999', address: '123 Main St' },

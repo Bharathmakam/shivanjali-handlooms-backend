@@ -8,7 +8,6 @@ import { PrismaService } from '../prisma/prisma.service';
 export interface CartItemDto {
   productId: string;
   quantity?: number;
-  fallPico?: boolean;
 }
 
 export interface CartItemResponse {
@@ -23,8 +22,6 @@ export interface CartItemResponse {
     isHandloom: boolean;
   };
   quantity: number;
-  fallPico: boolean;
-  fallPicoPrice: number;
   itemTotal: number;
 }
 
@@ -33,7 +30,6 @@ export interface CartResponse {
   items: CartItemResponse[];
   itemCount: number;
   subtotal: number;
-  gst: number;
   shippingCost: number;
   total: number;
 }
@@ -43,7 +39,6 @@ interface CartItemWithProduct {
   productId: string;
   product: CartItemResponse['product'];
   quantity: number;
-  fallPico: boolean;
 }
 
 interface CartForResponse {
@@ -51,34 +46,12 @@ interface CartForResponse {
   items: CartItemWithProduct[];
 }
 
-const FALL_PICO_PRICE = 450;
 const FREE_SHIPPING_THRESHOLD = 5000;
 const STANDARD_SHIPPING_COST = 99;
 
 @Injectable()
 export class CartService {
   constructor(private prisma: PrismaService) {}
-
-  private getGstRate(
-    basePrice: number,
-    servicePrice: number,
-    isHandloom: boolean,
-  ): number {
-    const totalValue = basePrice + servicePrice;
-    let gstRate = 5;
-
-    if (servicePrice > 0) {
-      if (totalValue > 2500) {
-        gstRate = 18;
-      } else if (totalValue > 1000) {
-        gstRate = 12;
-      }
-    } else if (!isHandloom && totalValue > 1000) {
-      gstRate = 12;
-    }
-
-    return gstRate;
-  }
 
   private getShippingCost(subtotal: number): number {
     return subtotal >= FREE_SHIPPING_THRESHOLD ? 0 : STANDARD_SHIPPING_COST;
@@ -165,9 +138,7 @@ export class CartService {
     }
 
     const existingItem = cart.items.find(
-      (ci) =>
-        ci.productId === item.productId &&
-        ci.fallPico === (item.fallPico ?? false),
+      (ci) => ci.productId === item.productId,
     );
 
     const nextQuantity = (existingItem?.quantity ?? 0) + requestedQuantity;
@@ -202,7 +173,6 @@ export class CartService {
           cartId: cart.id,
           productId: item.productId,
           quantity: requestedQuantity,
-          fallPico: item.fallPico ?? false,
         },
         include: {
           product: {
@@ -281,41 +251,6 @@ export class CartService {
     return this.getOrCreateCart(userId);
   }
 
-  async toggleFallPico(userId: string, cartItemId: string, fallPico: boolean) {
-    const cartItem = await this.prisma.cartItem.findUnique({
-      where: { id: cartItemId },
-      include: { cart: true },
-    });
-
-    if (!cartItem || cartItem.cart.userId !== userId) {
-      throw new NotFoundException('Cart item not found');
-    }
-
-    const duplicateItem = await this.prisma.cartItem.findFirst({
-      where: {
-        cartId: cartItem.cartId,
-        productId: cartItem.productId,
-        fallPico,
-        id: { not: cartItem.id },
-      },
-    });
-
-    if (duplicateItem) {
-      await this.prisma.cartItem.update({
-        where: { id: duplicateItem.id },
-        data: { quantity: duplicateItem.quantity + cartItem.quantity },
-      });
-      await this.prisma.cartItem.delete({ where: { id: cartItem.id } });
-    } else {
-      await this.prisma.cartItem.update({
-        where: { id: cartItemId },
-        data: { fallPico },
-      });
-    }
-
-    return this.getOrCreateCart(userId);
-  }
-
   async clearCart(userId: string) {
     const cart = await this.prisma.cart.findUnique({
       where: { userId },
@@ -372,31 +307,18 @@ export class CartService {
 
   private formatCartResponse(cart: CartForResponse): CartResponse {
     const items: CartItemResponse[] = cart.items.map((ci) => {
-      const fallPicoPrice = ci.fallPico ? FALL_PICO_PRICE : 0;
-      const itemTotal = (ci.product.price + fallPicoPrice) * ci.quantity;
+      const itemTotal = ci.product.price * ci.quantity;
 
       return {
         id: ci.id,
         productId: ci.productId,
         product: ci.product,
         quantity: ci.quantity,
-        fallPico: ci.fallPico,
-        fallPicoPrice,
         itemTotal,
       };
     });
 
     const subtotal = items.reduce((sum, item) => sum + item.itemTotal, 0);
-
-    const gst = items.reduce((sum, item) => {
-      const rate = this.getGstRate(
-        item.product.price,
-        item.fallPicoPrice,
-        item.product.isHandloom,
-      );
-      return sum + (item.itemTotal * rate) / 100;
-    }, 0);
-
     const shippingCost = this.getShippingCost(subtotal);
 
     return {
@@ -404,9 +326,8 @@ export class CartService {
       items,
       itemCount: items.reduce((sum, item) => sum + item.quantity, 0),
       subtotal,
-      gst,
       shippingCost,
-      total: subtotal + gst + shippingCost,
+      total: subtotal + shippingCost,
     };
   }
 }

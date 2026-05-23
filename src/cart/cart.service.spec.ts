@@ -29,7 +29,6 @@ describe('CartService', () => {
     productId: 'prod-1',
     product: mockProduct,
     quantity: 1,
-    fallPico: false,
   };
 
   const mockCartWithItems = {
@@ -45,15 +44,12 @@ describe('CartService', () => {
       productId: 'prod-1',
       product: mockProduct,
       quantity: 1,
-      fallPico: false,
-      fallPicoPrice: 0,
       itemTotal: 3000,
     }],
     itemCount: 1,
     subtotal: 3000,
-    gst: 150,
     shippingCost: 99,
-    total: 3249,
+    total: 3099,
   };
 
   const mockPrismaService = {
@@ -192,12 +188,12 @@ describe('CartService', () => {
       mockPrismaService.cart.create.mockResolvedValue({ id: 'cart-1', userId: 'user-1', items: [] });
       mockPrismaService.cartItem.create.mockResolvedValue(mockCartItem);
 
-      const result = await service.addItem('user-1', { productId: 'prod-1', quantity: 1, fallPico: false });
+      const result = await service.addItem('user-1', { productId: 'prod-1', quantity: 1 });
       expect(prisma.product.findUnique).toHaveBeenCalledWith({ where: { id: 'prod-1' } });
     });
 
     it('should update existing cart item quantity when adding same product', async () => {
-      const existingItem = { ...mockCartItem, quantity: 1, fallPico: false };
+      const existingItem = { ...mockCartItem, quantity: 1 };
       mockPrismaService.product.findUnique.mockResolvedValue(mockProduct);
       mockPrismaService.cart.findUnique.mockResolvedValue({
         ...mockCart,
@@ -211,7 +207,7 @@ describe('CartService', () => {
         items: [{ ...existingItem, quantity: 2, product: mockProduct }],
       });
 
-      const result = await service.addItem('user-1', { productId: 'prod-1', quantity: 1, fallPico: false });
+      const result = await service.addItem('user-1', { productId: 'prod-1', quantity: 1 });
 
       expect(prisma.cartItem.update).toHaveBeenCalled();
     });
@@ -234,27 +230,6 @@ describe('CartService', () => {
       expect(prisma.cartItem.create).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({ quantity: 1 }),
-        }),
-      );
-    });
-
-    it('should default fallPico to false when not provided', async () => {
-      mockPrismaService.product.findUnique.mockResolvedValue(mockProduct);
-      // cart exists with no existing items matching
-      mockPrismaService.cart.findUnique
-        .mockResolvedValueOnce({ ...mockCart, items: [] })
-        .mockResolvedValueOnce({
-          id: 'cart-1',
-          userId: 'user-1',
-          items: [{ ...mockCartItem, product: mockProduct }],
-        });
-      mockPrismaService.cartItem.create.mockResolvedValue(mockCartItem);
-
-      await service.addItem('user-1', { productId: 'prod-1', quantity: 1 });
-
-      expect(prisma.cartItem.create).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({ fallPico: false }),
         }),
       );
     });
@@ -360,76 +335,6 @@ describe('CartService', () => {
     });
   });
 
-  describe('toggleFallPico', () => {
-    it('should throw NotFoundException if cart item not found', async () => {
-      mockPrismaService.cartItem.findUnique.mockResolvedValue(null);
-
-      await expect(service.toggleFallPico('user-1', 'ci-1', true))
-        .rejects.toThrow(NotFoundException);
-    });
-
-    it('should throw NotFoundException if cart item belongs to different user', async () => {
-      mockPrismaService.cartItem.findUnique.mockResolvedValue({
-        ...mockCartItem,
-        cart: { userId: 'user-2' },
-      });
-
-      await expect(service.toggleFallPico('user-1', 'ci-1', true))
-        .rejects.toThrow(NotFoundException);
-    });
-
-    it('should update fallPico on the item if no duplicate exists', async () => {
-      mockPrismaService.cartItem.findUnique.mockResolvedValue({
-        ...mockCartItem,
-        cart: { userId: 'user-1', id: 'cart-1' },
-      });
-      mockPrismaService.cartItem.findFirst.mockResolvedValue(null);
-      mockPrismaService.cartItem.update.mockResolvedValue({ ...mockCartItem, fallPico: true });
-      mockPrismaService.cart.findUnique.mockResolvedValue({
-        id: 'cart-1',
-        userId: 'user-1',
-        items: [{ ...mockCartItem, fallPico: true, fallPicoPrice: 450, product: mockProduct }],
-      });
-
-      await service.toggleFallPico('user-1', 'ci-1', true);
-
-      expect(prisma.cartItem.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { id: 'ci-1' },
-          data: { fallPico: true },
-        }),
-      );
-    });
-
-    it('should merge quantities and delete original when duplicate exists', async () => {
-      const duplicateItem = { id: 'ci-2', cartId: 'cart-1', productId: 'prod-1', fallPico: true, quantity: 2 };
-      mockPrismaService.cartItem.findUnique.mockResolvedValue({
-        ...mockCartItem,
-        cart: { userId: 'user-1', id: 'cart-1' },
-        quantity: 1,
-      });
-      mockPrismaService.cartItem.findFirst.mockResolvedValue(duplicateItem);
-      mockPrismaService.cartItem.update.mockResolvedValue({ ...duplicateItem, quantity: 3 });
-      mockPrismaService.cartItem.delete.mockResolvedValue(mockCartItem);
-      mockPrismaService.cart.findUnique.mockResolvedValue({
-        id: 'cart-1',
-        userId: 'user-1',
-        items: [{ ...duplicateItem, quantity: 3, product: mockProduct }],
-      });
-
-      await service.toggleFallPico('user-1', 'ci-1', true);
-
-      // Should merge into duplicate and delete original
-      expect(prisma.cartItem.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { id: 'ci-2' },
-          data: { quantity: 3 },
-        }),
-      );
-      expect(prisma.cartItem.delete).toHaveBeenCalledWith({ where: { id: 'ci-1' } });
-    });
-  });
-
   describe('validateCartForCheckout', () => {
     it('should throw BadRequestException when cart is empty', async () => {
       const emptyCart = {
@@ -525,8 +430,8 @@ describe('CartService', () => {
 
     it('should attempt to add each local item to the cart', async () => {
       const localItems = [
-        { productId: 'prod-1', quantity: 1, fallPico: false },
-        { productId: 'prod-2', quantity: 2, fallPico: true },
+        { productId: 'prod-1', quantity: 1 },
+        { productId: 'prod-2', quantity: 2 },
       ];
 
       // First addItem call
@@ -572,25 +477,6 @@ describe('CartService', () => {
   });
 
   describe('formatCartResponse (via getOrCreateCart)', () => {
-    it('should calculate item total correctly with fallPico', async () => {
-      const cartWithFallPico = {
-        id: 'cart-1',
-        userId: 'user-1',
-        items: [{
-          ...mockCartItem,
-          fallPico: true,
-          product: mockProduct,
-        }],
-      };
-      mockPrismaService.cart.findUnique.mockResolvedValue(cartWithFallPico);
-
-      const result = await service.getOrCreateCart('user-1');
-
-      // fallPico adds 450 to the price
-      expect(result.items[0].fallPicoPrice).toBe(450);
-      expect(result.items[0].itemTotal).toBe((3000 + 450) * 1);
-    });
-
     it('should calculate shipping cost as free for orders >= 5000', async () => {
       const expensiveProduct = { ...mockProduct, price: 6000 };
       const cartWithExpensiveItem = {
@@ -600,7 +486,6 @@ describe('CartService', () => {
           ...mockCartItem,
           product: expensiveProduct,
           quantity: 1,
-          fallPico: false,
         }],
       };
       mockPrismaService.cart.findUnique.mockResolvedValue(cartWithExpensiveItem);
@@ -617,7 +502,6 @@ describe('CartService', () => {
           ...mockCartItem,
           product: mockProduct,
           quantity: 1,
-          fallPico: false,
         }],
       };
       mockPrismaService.cart.findUnique.mockResolvedValue(cart);
@@ -626,7 +510,7 @@ describe('CartService', () => {
       expect(result.shippingCost).toBe(99);
     });
 
-    it('should calculate total as subtotal + gst + shippingCost', async () => {
+    it('should calculate total as subtotal + shippingCost', async () => {
       const cart = {
         id: 'cart-1',
         userId: 'user-1',
@@ -634,13 +518,12 @@ describe('CartService', () => {
           ...mockCartItem,
           product: mockProduct,
           quantity: 1,
-          fallPico: false,
         }],
       };
       mockPrismaService.cart.findUnique.mockResolvedValue(cart);
 
       const result = await service.getOrCreateCart('user-1');
-      expect(result.total).toBe(result.subtotal + result.gst + result.shippingCost);
+      expect(result.total).toBe(result.subtotal + result.shippingCost);
     });
 
     it('should calculate itemCount as sum of all item quantities', async () => {
@@ -648,8 +531,8 @@ describe('CartService', () => {
         id: 'cart-1',
         userId: 'user-1',
         items: [
-          { ...mockCartItem, product: mockProduct, quantity: 2, fallPico: false },
-          { ...mockCartItem, id: 'ci-2', product: { ...mockProduct, id: 'prod-2' }, quantity: 3, fallPico: false },
+          { ...mockCartItem, product: mockProduct, quantity: 2 },
+          { ...mockCartItem, id: 'ci-2', product: { ...mockProduct, id: 'prod-2' }, quantity: 3 },
         ],
       };
       mockPrismaService.cart.findUnique.mockResolvedValue(cart);

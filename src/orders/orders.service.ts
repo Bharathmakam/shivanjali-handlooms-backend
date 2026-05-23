@@ -5,11 +5,9 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { TaxesService } from '../taxes/taxes.service';
 import { LogisticsService } from '../logistics/logistics.service';
 import { CrmService } from '../crm/crm.service';
 
-const FALL_PICO_PRICE = 450;
 const FREE_SHIPPING_THRESHOLD = 5000;
 const STANDARD_SHIPPING_COST = 99;
 
@@ -17,7 +15,6 @@ const STANDARD_SHIPPING_COST = 99;
 export class OrdersService {
   constructor(
     private prisma: PrismaService,
-    private taxesService: TaxesService,
     private logisticsService: LogisticsService,
     private crmService: CrmService,
   ) {}
@@ -41,7 +38,6 @@ export class OrdersService {
     }
 
     let subtotal = 0;
-    let totalGst = 0;
     const validatedItems = [];
 
     for (const item of items) {
@@ -71,20 +67,9 @@ export class OrdersService {
         );
       }
 
-      const servicePrice = item.fallPico ? FALL_PICO_PRICE : 0;
-      const itemBaseTotal = (product.price + servicePrice) * item.quantity;
+      const itemTotal = product.price * item.quantity;
 
-      const taxResult = this.taxesService.calculateGST({
-        name: product.name,
-        basePrice: product.price,
-        servicePrice,
-        isHandloom: product.isHandloom,
-      });
-
-      const itemGstAmount = taxResult.gstAmount * item.quantity;
-
-      subtotal += itemBaseTotal;
-      totalGst += itemGstAmount;
+      subtotal += itemTotal;
 
       validatedItems.push({
         productId: product.id,
@@ -92,10 +77,6 @@ export class OrdersService {
         category: product.category,
         price: product.price,
         quantity: item.quantity,
-        fallPico: item.fallPico ?? false,
-        fallPicoPrice: servicePrice,
-        gstRate: taxResult.gstRate,
-        gstAmount: itemGstAmount,
       });
     }
 
@@ -124,8 +105,8 @@ export class OrdersService {
         items: validatedItems,
         subtotal,
         shippingCost,
-        gstAmount: totalGst,
-        total: subtotal + totalGst + shippingCost,
+        gstAmount: 0,
+        total: subtotal + shippingCost,
         paymentMethod,
         razorpayOrderId: razorpayOrderId || null,
         paymentId: razorpayPaymentId || null,
